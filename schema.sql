@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS memories (
   category    ENUM('Career','Travel','Education','Personal') DEFAULT 'Personal',
   emotion     ENUM('Happy','Excited','Achievement','Sad','Love','Peaceful') DEFAULT 'Happy',
   date        DATE,
-  world_x     FLOAT,         -- canvas X position
-  world_y     FLOAT,         -- canvas Y position
+  worldX      FLOAT,         -- canvas X position
+  worldY      FLOAT,         -- canvas Y position
   size        INT DEFAULT 40, -- planet radius in px
   created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -1137,7 +1137,7 @@
   </div>
   <div class="panel-body">
     <div class="panel-section-label">Description</div>
-    <div class="panel-description" id="panel-desc">—</div>
+    <div class="panel-description" id="panel-description">—</div>
     <div class="panel-section-label">Category</div>
     <div id="panel-category"><span class="panel-category-tag">—</span></div>
     <div class="panel-section-label">Related Memories</div>
@@ -1164,7 +1164,7 @@
       </div>
       <div class="field-group">
         <label class="field-label">Description</label>
-        <textarea class="field-textarea" id="inp-desc" placeholder="Describe the memory in detail..."></textarea>
+        <textarea class="field-textarea" id="inp-description" placeholder="Describe the memory in detail..."></textarea>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div class="field-group">
@@ -1238,19 +1238,38 @@ let connections = [];
 
 function normalizeMemory(m) {
   if (m == null) return m;
+  
+  // Standardize ID
   if (m._id != null && m.id == null) {
     m.id = typeof m._id === 'object' ? m._id.toString() : m._id;
   }
-  if (m.worldX != null) m.worldX = Number(m.worldX);
-  if (m.worldY != null) m.worldY = Number(m.worldY);
-  if (m.size != null) m.size = Number(m.size);
+  if (m.id != null) m.id = m.id.toString();
+
+  // Standardize coordinates (support legacy world_x/y)
+  const x = m.worldX !== undefined ? m.worldX : m.world_x;
+  const y = m.worldY !== undefined ? m.worldY : m.world_y;
+  
+  m.worldX = (x != null) ? Number(x) : null;
+  m.worldY = (y != null) ? Number(y) : null;
+  m.size = (m.size != null) ? Number(m.size) : 40;
+
+  // Cleanup legacy fields
+  delete m.world_x;
+  delete m.world_y;
+
   return m;
 }
 
 function normalizeConnection(c) {
   if (c == null) return c;
+  
+  // Standardize naming: API returns from_id/to_id, frontend uses from/to
+  if (c.from_id !== undefined) c.from = c.from_id;
+  if (c.to_id !== undefined) c.to = c.to_id;
+  
   if (c.from != null) c.from = c.from.toString();
   if (c.to != null) c.to = c.to.toString();
+  
   return c;
 }
 
@@ -1285,7 +1304,13 @@ async function apiDelete(path) {
 async function loadMemoriesFromBackend() {
   try {
     const data = await apiGet('/memories.php');
-    memories = Array.isArray(data) ? data.map(normalizeMemory) : [];
+    const actualData = Array.isArray(data) ? data : (data.data || []);
+    
+    memories = actualData.map(normalizeMemory);
+    
+    // Ensure every memory has a position
+    memories.forEach(initWorldPos);
+
   } catch (err) {
     console.error('Failed to load memories from backend', err);
     memories = [];
@@ -1303,7 +1328,9 @@ async function loadConnections() {
 }
 
 async function refreshBackendData() {
-  await Promise.all([loadMemoriesFromBackend(), loadConnections()]);
+  // Task: Fetch connections AFTER memories
+  await loadMemoriesFromBackend();
+  await loadConnections();
 }
 
 async function addMemoryToBackend(memory) {
@@ -2035,16 +2062,22 @@ function getDominantEmotion(mems) {
 }
 
 function initWorldPos(m) {
-  if (m.worldX != null && m.worldY != null) return;
+  if (m.worldX != null && m.worldY != null && !isNaN(m.worldX) && !isNaN(m.worldY)) return;
+  
   const zone = clusterZones[m.category] || { cx:0.5, cy:0.5 };
   const spread = 0.13;
+  
   // Use stable seed from id
-  const seed = m.id * 137.508;
+  const idNum = parseInt(m.id, 10) || 0;
+  const seed = idNum * 137.508;
   const angle = (seed % (Math.PI * 2));
   const radius = ((seed * 0.618) % spread);
-  const W = window.innerWidth, H = window.innerHeight;
-  m.worldX = clamp((zone.cx + Math.cos(angle)*radius) * W, 80, W-80);
-  m.worldY = clamp((zone.cy + Math.sin(angle)*radius) * H, 80, H-80);
+  
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  
+  m.worldX = Math.round(clamp((zone.cx + Math.cos(angle)*radius) * W, 100, W-100));
+  m.worldY = Math.round(clamp((zone.cy + Math.sin(angle)*radius) * H, 100, H-100));
 }
 
 /* ═══════════════════════════════════════════════════
@@ -2231,7 +2264,7 @@ function openPanel(id) {
   document.getElementById('panel-date').textContent = m.date
     ? new Date(m.date).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})
     : '—';
-  document.getElementById('panel-desc').textContent = m.desc || '—';
+  document.getElementById('panel-description').textContent = (m.description && m.description.trim() !== '') ? m.description : "No description";
   document.getElementById('panel-category').innerHTML = `<span class="panel-category-tag">${m.category}</span>`;
 
   const relIds = connections
@@ -2270,7 +2303,7 @@ function openAddModal() {
   document.getElementById('modal-title').textContent = '✦ Add New Memory';
   document.getElementById('modal-submit-btn').textContent = 'Launch into Universe';
   document.getElementById('inp-title').value = '';
-  document.getElementById('inp-desc').value = '';
+  document.getElementById('inp-description').value = '';
   document.getElementById('inp-date').value = new Date().toISOString().split('T')[0];
   document.getElementById('inp-category').value = 'Career';
   selectedEmotion = '';
@@ -2286,7 +2319,7 @@ function editSelectedMemory() {
   document.getElementById('modal-title').textContent = '✦ Edit Memory';
   document.getElementById('modal-submit-btn').textContent = 'Save Changes';
   document.getElementById('inp-title').value = m.title;
-  document.getElementById('inp-desc').value = m.desc || '';
+  document.getElementById('inp-description').value = m.description || '';
   document.getElementById('inp-date').value = m.date || '';
   document.getElementById('inp-category').value = m.category;
   selectedEmotion = m.emotion;
@@ -2312,50 +2345,91 @@ async function submitMemory() {
   const title = document.getElementById('inp-title').value.trim();
   if (!title) {
     document.getElementById('inp-title').style.borderColor = 'var(--aurora-rose)';
-    setTimeout(()=>document.getElementById('inp-title').style.borderColor='',1500);
+    setTimeout(() => document.getElementById('inp-title').style.borderColor = '', 1500);
     return;
   }
-  const desc = document.getElementById('inp-desc').value.trim();
-  const cat = document.getElementById('inp-category').value;
+
+  const description = document.getElementById('inp-description').value.trim(); // ✅ FIXED
+  const category = document.getElementById('inp-category').value;
   const date = document.getElementById('inp-date').value;
-  const emo = selectedEmotion || 'Happy';
+  const emotion = selectedEmotion || 'Happy';
   const editId = parseInt(document.getElementById('inp-edit-id').value, 10);
 
   try {
     let newMemoryId = null;
 
     if (editId) {
-      await updateMemoryOnBackend(editId, { title, desc, category:cat, date, emotion:emo });
+      const existing = memories.find(m => String(m.id) === String(editId));
+      await updateMemoryOnBackend(editId, {
+        title,
+        description,
+        category,
+        date,
+        emotion,
+        worldX: existing ? existing.worldX : null,
+        worldY: existing ? existing.worldY : null
+      });
     } else {
-      const sizes = [36,38,40,42,44,46,48];
-      const nextId = memories.length ? Math.max(...memories.map(m => m.id)) + 1 : 1;
-      const size = sizes[nextId % sizes.length];
-      newMemoryId = await addMemoryToBackend({ title, desc, category:cat, emotion:emo, date, worldX:null, worldY:null, size });
+      const sizes = [36, 38, 40, 42, 44, 46, 48];
+      const nextIdNum = memories.length ? Math.max(...memories.map(m => parseInt(m.id,10) || 0)) + 1 : 1;
+      const size = sizes[nextIdNum % sizes.length];
+
+      // Temporary memory object to get generated positions
+      const tempMem = { id: nextIdNum, category };
+      initWorldPos(tempMem);
+
+      newMemoryId = await addMemoryToBackend({
+        title,
+        description,
+        category,
+        emotion,
+        date,
+        worldX: tempMem.worldX,
+        worldY: tempMem.worldY,
+        size
+      });
+
       const bounds = getYearBounds();
       activeYearRange.start = Math.min(activeYearRange.start, bounds.min);
       activeYearRange.end = Math.max(activeYearRange.end, bounds.max);
-      document.getElementById('year-start').value = activeYearRange.start;
-      document.getElementById('year-end').value = activeYearRange.end;
     }
+
   } catch (err) {
     console.error('Failed to save memory', err);
     return;
   }
 
   document.getElementById('modal-overlay').classList.remove('open');
-  scheduleRender();
 
+  // 🔥 VERY IMPORTANT (force refresh)
+  await refreshBackendData();
+  RenderEngine.render();
+
+  // 🎇 burst animation (same as yours)
   if (newMemoryId != null) {
-    const newMem = memories.find(m=>m.id===newMemoryId);
+    const newMem = memories.find(m => m.id == newMemoryId);
+
     if (newMem) {
       initWorldPos(newMem);
-      setTimeout(()=>{
+
+      setTimeout(() => {
         const burst = document.createElement('div');
         burst.className = 'burst-ring';
-        const color = emotionColors[emo];
-        burst.style.cssText = `left:${newMem.worldX}px;top:${newMem.worldY}px;width:60px;height:60px;border-color:${color};margin-left:-30px;margin-top:-30px;`;
+
+        const color = emotionColors[emotion];
+
+        burst.style.cssText = `
+          left:${newMem.worldX}px;
+          top:${newMem.worldY}px;
+          width:60px;
+          height:60px;
+          border-color:${color};
+          margin-left:-30px;
+          margin-top:-30px;
+        `;
+
         document.getElementById('universe-world').appendChild(burst);
-        setTimeout(()=>burst.remove(),700);
+        setTimeout(() => burst.remove(), 700);
       }, 200);
     }
   }

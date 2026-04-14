@@ -1,225 +1,143 @@
 <?php
-// ─────────────────────────────────────────
-//  api/memories.php
-//  Handles: GET / POST / PUT / DELETE
-//  Routes via the HTTP method + ?id= param
-// ─────────────────────────────────────────
+/**
+ * api/memories.php
+ * Handles: GET / POST / PUT / DELETE
+ */
 
 require_once __DIR__ . '/../config/db.php';
 
-// ── CORS headers (allow the HTML frontend to call this) ──
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 header('Content-Type: application/json');
 
-// Pre-flight OPTIONS request — browsers send this before PUT/DELETE
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// ── Open DB ──
 $db = get_db();
-
-// ── Route by HTTP method ──
 $method = $_SERVER['REQUEST_METHOD'];
-$id     = isset($_GET['id']) ? (int) $_GET['id'] : null;
+$id = isset($_GET['id']) ? (int) $_GET['id'] : null;
 
 switch ($method) {
-
-    // ────────────────────────────────────────────
-    //  GET /api/memories
-    //  Returns all memories ordered by date DESC
-    // ────────────────────────────────────────────
     case 'GET':
-        $result = $db->query(
-            'SELECT id, title, description, category, emotion,
-                    date, worldX, worldY, size, created_at
-             FROM memories
-             ORDER BY date DESC'
-        );
-
+        $query = "SELECT id, title, description, category, emotion, date, worldX, worldY, size FROM memories ORDER BY date DESC";
+        $result = $db->query($query);
         $rows = [];
-        while ($row = $result->fetch_assoc()) {
-            // Cast numeric fields so JS gets numbers, not strings
-            $row['id']      = (int)   $row['id'];
-            $row['world_x'] = $row['world_x'] !== null ? (float) $row['world_x'] : null;
-            $row['world_y'] = $row['world_y'] !== null ? (float) $row['world_y'] : null;
-            $row['size']    = (int)   $row['size'];
-            $rows[] = $row;
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $row['id'] = (int)$row['id'];
+                $row['worldX'] = $row['worldX'] !== null ? (float)$row['worldX'] : null;
+                $row['worldY'] = $row['worldY'] !== null ? (float)$row['worldY'] : null;
+                $row['size'] = (int)$row['size'];
+                $rows[] = $row;
+            }
         }
-
         echo json_encode($rows);
         break;
 
-
-    // ────────────────────────────────────────────
-    //  POST /api/memories
-    //  Body (JSON): title, description, category, emotion,
-    //               date, worldX, worldY, size
-    // ────────────────────────────────────────────
     case 'POST':
-        $body = json_decode(file_get_contents('php://input'), true);
-
-        // Debug: temporarily return received input
-        // echo json_encode(['received' => $body]); exit;
-
-        // Basic validation — title is the only required field
-        if (empty($body['title'])) {
+        $body = json_decode(file_get_contents("php://input"), true);
+        if (!$body || empty($body['title'])) {
             http_response_code(400);
-            echo json_encode(['error' => 'title is required']);
+            echo json_encode(['error' => 'Title is required']);
             exit;
         }
 
-        $stmt = $db->prepare(
-            'INSERT INTO memories
-               (title, description, category, emotion, date, worldX, worldY, size)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-
-        if (!$stmt) {
-            http_response_code(500);
-            echo json_encode(['error' => 'Prepare failed: ' . $db->error]);
-            exit;
-        }
-
-        $title    = $body['title'];
-        $desc     = $body['desc']     ?? null;
+        $title = $body['title'];
+        $description = $body['description'] ?? ($body['desc'] ?? null);
         $category = $body['category'] ?? 'Personal';
-        $emotion  = $body['emotion']  ?? 'Happy';
-        $date     = $body['date']     ?? null;
-        $worldX   = isset($body['worldX']) ? (float) $body['worldX'] : null;
-        $worldY   = isset($body['worldY']) ? (float) $body['worldY'] : null;
-        $size     = isset($body['size'])   ? (int)   $body['size']   : 40;
+        $emotion = $body['emotion'] ?? 'Happy';
+        $date = $body['date'] ?? date('Y-m-d');
+        $worldX = isset($body['worldX']) ? (float)$body['worldX'] : (isset($body['world_x']) ? (float)$body['world_x'] : 0);
+        $worldY = isset($body['worldY']) ? (float)$body['worldY'] : (isset($body['world_y']) ? (float)$body['world_y'] : 0);
+        $size = isset($body['size']) ? (int)$body['size'] : 40;
 
-        // bind_param types: s=string, d=double, i=integer
-        // title(s), description(s), category(s), emotion(s), date(s), worldX(d), worldY(d), size(i)
-        $stmt->bind_param('sssssddi', $title, $desc, $category, $emotion, $date, $worldX, $worldY, $size);
+        $stmt = $db->prepare("INSERT INTO memories (title, description, category, emotion, date, worldX, worldY, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("sssssddi", $title, $description, $category, $emotion, $date, $worldX, $worldY, $size);
 
         if ($stmt->execute()) {
-            http_response_code(201);
             echo json_encode(['success' => true, 'id' => $db->insert_id]);
         } else {
             http_response_code(500);
-            echo json_encode(['error' => 'Execute failed: ' . $stmt->error]);
+            echo json_encode(['error' => $stmt->error]);
         }
-
         $stmt->close();
         break;
 
-
-    // ────────────────────────────────────────────
-    //  PUT /api/memories?id=1
-    //  Body (JSON): title, description, category, emotion,
-    //               date, worldX, worldY, size
-    // ────────────────────────────────────────────
     case 'PUT':
         if (!$id) {
             http_response_code(400);
-            echo json_encode(['error' => 'id query param is required']);
+            echo json_encode(['error' => 'ID is required']);
             exit;
         }
 
-        $body = json_decode(file_get_contents('php://input'), true);
-
-        if (empty($body['title'])) {
+        $body = json_decode(file_get_contents("php://input"), true);
+        if (!$body) {
             http_response_code(400);
-            echo json_encode(['error' => 'title is required']);
+            echo json_encode(['error' => 'No data provided']);
             exit;
         }
 
-        $stmt = $db->prepare(
-            'UPDATE memories
-             SET title=?, description=?, category=?, emotion=?,
-                 date=?, worldX=?, worldY=?, size=?
-             WHERE id=?'
-        );
+        // Check if it's a POSITION ONLY update (from dragging)
+        if (isset($body['worldX']) && isset($body['worldY']) && !isset($body['title'])) {
+            $worldX = floatval($body['worldX']);
+            $worldY = floatval($body['worldY']);
 
-        if (!$stmt) {
-            http_response_code(500);
-            echo json_encode(['error' => 'Prepare failed: ' . $db->error]);
+            $stmt = $db->prepare("UPDATE memories SET worldX=?, worldY=? WHERE id=?");
+            $stmt->bind_param("ddi", $worldX, $worldY, $id);
+            
+            if ($stmt->execute()) {
+                echo json_encode(['success' => true]);
+            } else {
+                http_response_code(500);
+                echo json_encode(['error' => $stmt->error]);
+            }
+            $stmt->close();
+            break;
+        }
+
+        // Full update (from modal)
+        $title = $body['title'] ?? null;
+        if (!$title) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Title is required for full update']);
             exit;
         }
 
-        $title       = $body['title'];
-        $desc        = $body['desc']     ?? null;
+        $description = $body['description'] ?? ($body['desc'] ?? null);
         $category    = $body['category'] ?? 'Personal';
         $emotion     = $body['emotion']  ?? 'Happy';
-        $date        = $body['date']     ?? null;
-        $worldX      = isset($body['worldX']) ? (float) $body['worldX'] : null;
-        $worldY      = isset($body['worldY']) ? (float) $body['worldY'] : null;
-        $size        = isset($body['size'])   ? (int)   $body['size']   : 40;
+        $date        = $body['date']     ?? date('Y-m-d');
+        $worldX      = isset($body['worldX']) ? (float)$body['worldX'] : (isset($body['world_x']) ? (float)$body['world_x'] : 0);
+        $worldY      = isset($body['worldY']) ? (float)$body['worldY'] : (isset($body['world_y']) ? (float)$body['world_y'] : 0);
+        $size        = isset($body['size']) ? (int)$body['size'] : 40;
 
-        $stmt->bind_param('sssssddii', $title, $desc, $category, $emotion, $date, $worldX, $worldY, $size, $id);
+        $stmt = $db->prepare("UPDATE memories SET title=?, description=?, category=?, emotion=?, date=?, worldX=?, worldY=?, size=? WHERE id=?");
+        $stmt->bind_param("sssssddii", $title, $description, $category, $emotion, $date, $worldX, $worldY, $size, $id);
 
         if ($stmt->execute()) {
             echo json_encode(['success' => true]);
         } else {
             http_response_code(500);
-            echo json_encode(['error' => 'Execute failed: ' . $stmt->error]);
+            echo json_encode(['error' => $stmt->error]);
         }
-
         $stmt->close();
         break;
 
-
-    // ────────────────────────────────────────────
-    //  DELETE /api/memories?id=1
-    //  Also removes all connections for that memory
-    //  (the FK CASCADE handles it automatically, but
-    //   we delete explicitly for clarity)
-    // ────────────────────────────────────────────
     case 'DELETE':
         if (!$id) {
             http_response_code(400);
-            echo json_encode(['error' => 'id query param is required']);
             exit;
         }
-
-        // Remove linked connections first (in case FK cascade isn't set)
-        $stmt = $db->prepare(
-            'DELETE FROM connections WHERE from_id=? OR to_id=?'
-        );
-
-        if (!$stmt) {
-            http_response_code(500);
-            echo json_encode(['error' => 'Prepare failed: ' . $db->error]);
-            exit;
-        }
-
-        $stmt->bind_param('ii', $id, $id);
-        $stmt->execute();
-        $stmt->close();
-
-        // Now delete the memory itself
-        $stmt = $db->prepare('DELETE FROM memories WHERE id=?');
-
-        if (!$stmt) {
-            http_response_code(500);
-            echo json_encode(['error' => 'Prepare failed: ' . $db->error]);
-            exit;
-        }
-
-        $stmt->bind_param('i', $id);
-
+        $stmt = $db->prepare("DELETE FROM memories WHERE id=?");
+        $stmt->bind_param("i", $id);
         if ($stmt->execute()) {
             echo json_encode(['success' => true]);
-        } else {
-            http_response_code(500);
-            echo json_encode(['error' => 'Execute failed: ' . $stmt->error]);
         }
-
         $stmt->close();
         break;
-
-
-    // ── Unknown method ──
-    default:
-        http_response_code(405);
-        echo json_encode(['error' => 'Method not allowed']);
-        break;
 }
-
 
 $db->close();
