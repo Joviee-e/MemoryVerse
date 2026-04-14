@@ -7,7 +7,7 @@
 
 define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
-define('DB_PASS', 'your_password');   // ← change this
+define('DB_PASS', '');  // ← change this
 define('DB_NAME', 'memoryverse');
 
 /**

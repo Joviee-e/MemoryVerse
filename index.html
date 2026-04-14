@@ -1232,7 +1232,7 @@ const clusterZones = {
 /* ═══════════════════════════════════════════════════
    STATE MANAGER
 ═══════════════════════════════════════════════════ */
-const API_BASE = 'http://localhost/memoryverse/backend/api/memories.php';
+const API_BASE = 'http://localhost/memoryverse/backend/api';
 let memories = [];
 let connections = [];
 
@@ -1284,7 +1284,7 @@ async function apiDelete(path) {
 
 async function loadMemoriesFromBackend() {
   try {
-    const data = await apiGet('/memories');
+    const data = await apiGet('/memories.php');
     memories = Array.isArray(data) ? data.map(normalizeMemory) : [];
   } catch (err) {
     console.error('Failed to load memories from backend', err);
@@ -1294,7 +1294,7 @@ async function loadMemoriesFromBackend() {
 
 async function loadConnections() {
   try {
-    const data = await apiGet('/connections');
+    const data = await apiGet('/connections.php');
     connections = Array.isArray(data) ? data.map(normalizeConnection) : [];
   } catch (err) {
     console.error('Failed to load connections from backend', err);
@@ -1307,23 +1307,23 @@ async function refreshBackendData() {
 }
 
 async function addMemoryToBackend(memory) {
-  const result = await apiPost('/memories', memory);
+  const result = await apiPost('/memories.php', memory);
   await refreshBackendData();
-  return result?._id;
+  return result?.id;
 }
 
 async function updateMemoryOnBackend(id, updates) {
-  await apiPut(`/memories/${id}`, updates);
+  await apiPut(`/memories.php?id=${id}`, updates);
   await refreshBackendData();
 }
 
 async function deleteMemoryFromBackend(id) {
-  await apiDelete(`/memories/${id}`);
+  await apiDelete(`/memories.php?id=${id}`);
   await refreshBackendData();
 }
 
 async function addConnectionToBackend(from, to) {
-  await apiPost('/connections', { from, to });
+  await apiPost('/connections.php', { from, to });
   await loadConnections();
 }
 

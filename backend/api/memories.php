@@ -35,7 +35,7 @@ switch ($method) {
     case 'GET':
         $result = $db->query(
             'SELECT id, title, description, category, emotion,
-                    date, world_x, world_y, size, created_at
+                    date, worldX, worldY, size, created_at
              FROM memories
              ORDER BY date DESC'
         );
@@ -56,11 +56,14 @@ switch ($method) {
 
     // ────────────────────────────────────────────
     //  POST /api/memories
-    //  Body (JSON): title, desc, category, emotion,
+    //  Body (JSON): title, description, category, emotion,
     //               date, worldX, worldY, size
     // ────────────────────────────────────────────
     case 'POST':
         $body = json_decode(file_get_contents('php://input'), true);
+
+        // Debug: temporarily return received input
+        // echo json_encode(['received' => $body]); exit;
 
         // Basic validation — title is the only required field
         if (empty($body['title'])) {
@@ -71,9 +74,15 @@ switch ($method) {
 
         $stmt = $db->prepare(
             'INSERT INTO memories
-               (title, description, category, emotion, date, world_x, world_y, size)
+               (title, description, category, emotion, date, worldX, worldY, size)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         );
+
+        if (!$stmt) {
+            http_response_code(500);
+            echo json_encode(['error' => 'Prepare failed: ' . $db->error]);
+            exit;
+        }
 
         $title    = $body['title'];
         $desc     = $body['desc']     ?? null;
@@ -85,26 +94,15 @@ switch ($method) {
         $size     = isset($body['size'])   ? (int)   $body['size']   : 40;
 
         // bind_param types: s=string, d=double, i=integer
-        $stmt->bind_param(
-            'ssssssddi',
-            $title, $desc, $category, $emotion, $date, $worldX, $worldY, $size
-        );
-
-        // Fix: correct bind_param type string (8 params → 8 type chars)
-        $stmt->close();
-        $stmt = $db->prepare(
-            'INSERT INTO memories
-               (title, description, category, emotion, date, world_x, world_y, size)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-        );
+        // title(s), description(s), category(s), emotion(s), date(s), worldX(d), worldY(d), size(i)
         $stmt->bind_param('sssssddi', $title, $desc, $category, $emotion, $date, $worldX, $worldY, $size);
 
         if ($stmt->execute()) {
             http_response_code(201);
-            echo json_encode(['id' => $db->insert_id]);
+            echo json_encode(['success' => true, 'id' => $db->insert_id]);
         } else {
             http_response_code(500);
-            echo json_encode(['error' => $stmt->error]);
+            echo json_encode(['error' => 'Execute failed: ' . $stmt->error]);
         }
 
         $stmt->close();
@@ -113,8 +111,8 @@ switch ($method) {
 
     // ────────────────────────────────────────────
     //  PUT /api/memories?id=1
-    //  Body (JSON): title, desc, category, emotion,
-    //               date, worldX, worldY
+    //  Body (JSON): title, description, category, emotion,
+    //               date, worldX, worldY, size
     // ────────────────────────────────────────────
     case 'PUT':
         if (!$id) {
@@ -134,25 +132,32 @@ switch ($method) {
         $stmt = $db->prepare(
             'UPDATE memories
              SET title=?, description=?, category=?, emotion=?,
-                 date=?, world_x=?, world_y=?
+                 date=?, worldX=?, worldY=?, size=?
              WHERE id=?'
         );
 
-        $title    = $body['title'];
-        $desc     = $body['desc']     ?? null;
-        $category = $body['category'] ?? 'Personal';
-        $emotion  = $body['emotion']  ?? 'Happy';
-        $date     = $body['date']     ?? null;
-        $worldX   = isset($body['worldX']) ? (float) $body['worldX'] : null;
-        $worldY   = isset($body['worldY']) ? (float) $body['worldY'] : null;
+        if (!$stmt) {
+            http_response_code(500);
+            echo json_encode(['error' => 'Prepare failed: ' . $db->error]);
+            exit;
+        }
 
-        $stmt->bind_param('ssssssddi', $title, $desc, $category, $emotion, $date, $worldX, $worldY, $id);
+        $title       = $body['title'];
+        $desc        = $body['desc']     ?? null;
+        $category    = $body['category'] ?? 'Personal';
+        $emotion     = $body['emotion']  ?? 'Happy';
+        $date        = $body['date']     ?? null;
+        $worldX      = isset($body['worldX']) ? (float) $body['worldX'] : null;
+        $worldY      = isset($body['worldY']) ? (float) $body['worldY'] : null;
+        $size        = isset($body['size'])   ? (int)   $body['size']   : 40;
+
+        $stmt->bind_param('sssssddii', $title, $desc, $category, $emotion, $date, $worldX, $worldY, $size, $id);
 
         if ($stmt->execute()) {
-            echo json_encode(['ok' => true]);
+            echo json_encode(['success' => true]);
         } else {
             http_response_code(500);
-            echo json_encode(['error' => $stmt->error]);
+            echo json_encode(['error' => 'Execute failed: ' . $stmt->error]);
         }
 
         $stmt->close();
@@ -176,19 +181,33 @@ switch ($method) {
         $stmt = $db->prepare(
             'DELETE FROM connections WHERE from_id=? OR to_id=?'
         );
+
+        if (!$stmt) {
+            http_response_code(500);
+            echo json_encode(['error' => 'Prepare failed: ' . $db->error]);
+            exit;
+        }
+
         $stmt->bind_param('ii', $id, $id);
         $stmt->execute();
         $stmt->close();
 
         // Now delete the memory itself
         $stmt = $db->prepare('DELETE FROM memories WHERE id=?');
+
+        if (!$stmt) {
+            http_response_code(500);
+            echo json_encode(['error' => 'Prepare failed: ' . $db->error]);
+            exit;
+        }
+
         $stmt->bind_param('i', $id);
 
         if ($stmt->execute()) {
-            echo json_encode(['ok' => true]);
+            echo json_encode(['success' => true]);
         } else {
             http_response_code(500);
-            echo json_encode(['error' => $stmt->error]);
+            echo json_encode(['error' => 'Execute failed: ' . $stmt->error]);
         }
 
         $stmt->close();
@@ -201,5 +220,6 @@ switch ($method) {
         echo json_encode(['error' => 'Method not allowed']);
         break;
 }
+
 
 $db->close();

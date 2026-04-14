@@ -33,7 +33,7 @@ switch ($method) {
     // ────────────────────────────────────────────
     case 'GET':
         $result = $db->query(
-            'SELECT id, from_id, to_id, created_at FROM connections'
+            'SELECT id, from_id as `from`, to_id as `to`, created_at FROM connections'
         );
 
         $rows = [];
