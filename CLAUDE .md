@@ -1,3 +1,4 @@
+
 # CLAUDE.md — Memory Cosmos: Planet-Based Memory Storage UI
 
 ## Project Vision

@@ -1560,9 +1560,10 @@
       // ── CONFIG ──
       // Change MODEL_BASE to match where your GLTF folders are served from.
       // Each folder (earth/, mars/, etc.) should contain scene.gltf + .bin + textures
-      const MODEL_BASE = '/public/models'
+      const MODEL_BASE = 'public/model';
       const PLANET_NAMES = ['earth', 'mars', 'jupiter', 'saturn', 'venus', 'neptune', 'mercury', 'uranus'];
       const SUN_MODEL = 'sun';
+      const GALAXY_MODEL = 'milky_way';
       // File inside each folder — change if yours uses a different name
       const GLTF_FILE = 'scene.gltf';
 
@@ -1626,7 +1627,7 @@
 
       function loadAllModels() {
         const loader = new THREE.GLTFLoader();
-        const allNames = [...PLANET_NAMES, SUN_MODEL];
+        const allNames = [...PLANET_NAMES, SUN_MODEL, GALAXY_MODEL];
         let loaded = 0;
         let failed = 0;
 
@@ -1648,7 +1649,8 @@
               const center = box.getCenter(new THREE.Vector3());
               model.position.sub(center.multiplyScalar(1 / maxDim));
 
-              loadedModels[name] = model;
+              const normFactor = maxDim > 0 ? (1 / maxDim) : 1;
+              loadedModels[name] = { model, normFactor };
               loaded++;
               showStatus(`Loading 3D models... ${loaded}/${allNames.length}`);
               if (loaded + failed === allNames.length) {
@@ -1721,20 +1723,20 @@
           }
 
           // Create new 3D planet
-          const template = getModelForMemory(m);
+          const entry = getModelForMemory(m);
           let mesh;
           const planetScale = (m.size || 40) * 0.8;
 
-          if (template) {
-            mesh = template.clone();
-            mesh.scale.set(planetScale, planetScale, planetScale);
+          if (entry && entry.model) {
+            mesh = entry.model.clone();
+            // Multiply normFactor by desired pixel size — don't override the normalization
+            mesh.scale.setScalar(planetScale * entry.normFactor);
             // Apply emotion-based tint via traverse
             const color = emotionColors[m.emotion] || '#ffffff';
             const threeColor = new THREE.Color(color);
             mesh.traverse(child => {
               if (child.isMesh && child.material) {
                 child.material = child.material.clone();
-                // Blend emotion color as emissive tint
                 child.material.emissive = threeColor;
                 child.material.emissiveIntensity = 0.15;
               }
@@ -1775,11 +1777,50 @@
         });
       }
 
+      // Render milky_way 3D models at cosmos galaxy positions
+      const activeGalaxies = {};
+      function updateCosmosGalaxies(galaxyPositions) {
+        // galaxyPositions = [{ id, wx, wy, size }]
+        const visibleIds = new Set(galaxyPositions.map(g => g.id));
+
+        // Remove old
+        Object.keys(activeGalaxies).forEach(id => {
+          if (!visibleIds.has(id)) {
+            scene.remove(activeGalaxies[id].mesh);
+            delete activeGalaxies[id];
+          }
+        });
+
+        const milkyEntry = loadedModels['milky_way'];
+        if (!milkyEntry) return; // not loaded yet
+
+        galaxyPositions.forEach(g => {
+          if (activeGalaxies[g.id]) {
+            activeGalaxies[g.id].mesh.position.set(g.wx, -g.wy, 0);
+            return;
+          }
+          const mesh = milkyEntry.model.clone();
+          const galaxyScale = g.size * milkyEntry.normFactor;
+          mesh.scale.setScalar(galaxyScale);
+          mesh.position.set(g.wx, -g.wy, 0);
+          scene.add(mesh);
+          activeGalaxies[g.id] = { mesh, rotSpeed: 0.15 + Math.random() * 0.1 };
+        });
+      }
+
+      function clearCosmosGalaxies() {
+        Object.keys(activeGalaxies).forEach(id => {
+          scene.remove(activeGalaxies[id].mesh);
+          delete activeGalaxies[id];
+        });
+      }
+
       function clearAll() {
         Object.keys(activePlanets).forEach(id => {
           scene.remove(activePlanets[id].mesh);
           delete activePlanets[id];
         });
+        clearCosmosGalaxies();
       }
 
       function animate() {
@@ -1795,19 +1836,13 @@
         // Rotate all active planets
         Object.values(activePlanets).forEach(p => {
           if (!p || !p.mesh) return;
-          // Axis rotation (continuous spin)
           p.mesh.rotation.y += p.rotSpeed * delta;
+        });
 
-          // Subtle orbital wobble
-          const wobbleX = Math.sin(elapsed * p.orbitSpeed + p.orbitPhase) * p.orbitRadius * 0.15;
-          const wobbleY = Math.cos(elapsed * p.orbitSpeed * 0.7 + p.orbitPhase) * p.orbitRadius * 0.1;
-          // Store base position and apply wobble
-          if (p.baseX == null) {
-            p.baseX = p.mesh.position.x;
-            p.baseY = p.mesh.position.y;
-          }
-          // Only wobble if not being dragged
-          // (base position gets updated in updatePlanets)
+        // Rotate cosmos galaxies
+        Object.values(activeGalaxies).forEach(g => {
+          if (!g || !g.mesh) return;
+          g.mesh.rotation.y += g.rotSpeed * delta;
         });
 
         // Sun light follows center of view
@@ -1827,7 +1862,7 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
       }
 
-      return { init, updatePlanets, clearAll, get modelsReady() { return modelsReady; } };
+      return { init, updatePlanets, updateCosmosGalaxies, clearCosmosGalaxies, clearAll, get modelsReady() { return modelsReady; } };
     })();
 
     /* ═══════════════════════════════════════════════════
@@ -2138,6 +2173,7 @@
           ThreeEngine.clearAll();
           renderClusters();
         } else {
+          ThreeEngine.clearCosmosGalaxies();
           renderMemories();
         }
       }
@@ -2155,6 +2191,7 @@
         const decades = Object.keys(groups).map(Number).sort();
         const cx = W / 2, cy = H / 2;
         const radius = Math.min(W, H) * 0.32;
+        const galaxyPositions = [];
 
         decades.forEach((decade, i) => {
           const mems = groups[decade];
@@ -2174,13 +2211,18 @@
           const driftY = (Math.random() * 20 - 10).toFixed(0) + 'px';
           const driftD = (15 + Math.random() * 10).toFixed(1) + 's';
 
+          // Collect position for 3D milky_way model
+          galaxyPositions.push({ id: galaxyId, wx: pos.wx, wy: pos.wy, size: size * 1.5 });
+
+          // DOM element for tooltip + click only — inner blob hidden when 3D is ready
           const galaxy = document.createElement('div');
           galaxy.className = 'cosmos-galaxy';
           galaxy.style.cssText = `left:${pos.wx}px;top:${pos.wy}px;width:${size}px;height:${size}px;--drift-y:${driftY};--drift-d:${driftD};`;
           galaxy.dataset.decade = decade;
 
+          const hasModel = ThreeEngine.modelsReady;
           galaxy.innerHTML = `
-        <div class="cosmos-galaxy-inner" style="background:radial-gradient(ellipse at 40% 40%,${color}dd,${color}66 40%,${color}22 70%,transparent);box-shadow:0 0 ${size * 0.5}px ${color}44,0 0 ${size}px ${color}22,0 0 ${size * 2}px ${color}11;"></div>
+        <div class="cosmos-galaxy-inner" style="${hasModel ? 'display:none;' : ''}background:radial-gradient(ellipse at 40% 40%,${color}dd,${color}66 40%,${color}22 70%,transparent);box-shadow:0 0 ${size * 0.5}px ${color}44,0 0 ${size}px ${color}22,0 0 ${size * 2}px ${color}11;"></div>
         <div class="cosmos-galaxy-tooltip">
           <div class="galaxy-tooltip-decade">${decade}s Universe</div>
           <div class="galaxy-tooltip-count">${mems.length} memor${mems.length === 1 ? 'y' : 'ies'}</div>
@@ -2196,6 +2238,9 @@
 
           document.getElementById('universe-world').appendChild(galaxy);
         });
+
+        // Place milky_way 3D models at galaxy positions
+        ThreeEngine.updateCosmosGalaxies(galaxyPositions);
       }
 
       function renderClusters() {
