@@ -1,0 +1,10 @@
+{
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(json|php|html|css|js|yml|yaml|xml\\)$\")"
+    ]
+  }
+}
